@@ -23,7 +23,7 @@ async function setup() {
 	
 	Answers = db.collection('answers')
 	Answers.ensureIndex({
-		question: 'text'
+		'question.data.text': 'text'
 	})
 }
 
@@ -34,11 +34,11 @@ setup().catch(error => {
 
 const parseSlackPermalink = permalink => {
 	const [match, channel, ts1, ts2] = permalink.match(
-		/^https:\/\/\w+.slack.com\/archives\/([GC][\dA-Z]+)\/p(\d{10})(\d{6})$/
+		/^<?https:\/\/\w+.slack.com\/archives\/([GC][\dA-Z]+)\/p(\d{10})(\d{6})>?$/
 	) || [false]
 
 	if(!match) {
-		throw new Error(`could not parse ${permalink} as a slack permalink`)
+		return false
 	}
 
 	return {
@@ -46,6 +46,44 @@ const parseSlackPermalink = permalink => {
 		ts: `${ts1}.${ts2}`
 	}
 }
+
+const getMessage = query => slackUser.conversations.replies(query).then(({messages}) => messages[0])
+
+const parseSpec = async (spec, context) => {
+	spec = spec.trim()
+
+	const [isText, text] = spec.match(/^"(.+)"$/) || [false]
+	if(isText) return {type: 'text', data: {text}}
+
+	const permalink = parseSlackPermalink(spec)
+	if(permalink) return {type: 'message', data: await getMessage(permalink)}
+
+	if(spec === 'this') return {type: 'message', data: await getMessage(context)}
+
+	throw new Error(`couldn't parse`)
+}
+
+const postAnswers = (answers, {event, boneless = false} = {}) => slackBot.chat.postMessage({
+	channel: event.event.channel,
+	thread_ts: event.event.thread_ts || event.event.ts,
+	as_user: true,
+	icon_emoji: 'books',
+	text: !answers.length ? `sorry, i couldn't find anything relevant. maybe somebody else knows?` : '',
+	attachments: flatMap(answers, answer => [
+		{
+			fallback: answer.question.data.text,
+			text: answer.question.data.text,
+			color: '#00994d',
+			ts: answer.question.data.ts
+		},
+		{
+			fallback: answer.answer.data.text,
+			text: answer.answer.data.text,
+			color: '#0f5499',
+			ts: answer.answer.data.ts
+		}
+	])
+})
 
 module.exports = route({
 	'/': () => `
@@ -114,9 +152,9 @@ module.exports = route({
 				switch(event.event.type) {
 					case 'app_mention': {
 						const parser = regices({
-							async '^<@U[\\dA-Z]+>(.*)\\?' (query) {
+							async '^<@U[\\dA-Z]+>(.*)\\?' (_, query) {
 								if(!query) {
-									const {messages: [parentMessage]} = await slackUser.conversations.replies({
+									const parentMessage = await getMessage({
 										channel: event.event.channel,
 										ts: event.event.thread_ts
 									})
@@ -133,40 +171,52 @@ module.exports = route({
 								}).limit(10).toArray()
 
 								const sorted = orderBy(answers, answer => {
-									const recency = 1 + new Date() - new Date(answer.date)
+									const recency = 1 + new Date() - new Date(answer.answer.data.date)
 									return answer.score / recency
 								}, 'desc')
+
+								await postAnswers(sorted, {event})
+								return send(res, 200)
+							},
+
+							async '^<@U[\\dA-Z]+>(.+) (?:is (?:the|an) answer to|answers) (.+)$' (_, answerSpec, questionSpec) {
+								const context = {
+									channel: event.event.channel,
+									ts: event.event.thread_ts // TODO get most recent message if no thread?
+								}
+
+								const [answer, question] = await Promise.all([
+									parseSpec(answerSpec, context),
+									parseSpec(questionSpec, context)
+								])
+
+								const answerData = { answer, question }
+								await Answers.insert(answerData)
+
+								await postAnswers([answerData], {event, boneless: true})
+
+								return send(res, 200)
+							},
+
+							async '^<@U[\\dA-Z]+> forget everything you(\'|’)ve ever learnt. yes i(\'|’)m sure' () {
+								await Answers.remove({})
 
 								await slackBot.chat.postMessage({
 									channel: event.event.channel,
 									thread_ts: event.event.thread_ts || event.event.ts,
 									as_user: true,
 									icon_emoji: 'books',
-									text: !answers.length ? `sorry, i couldn't find anything relevant. maybe somebody else knows?` : '',
-									attachments: flatMap(sorted, answer => [
-										{
-											fallback: answer.question,
-											text: answer.question,
-											color: '#00994d',
-											ts: new Date(answer.date).getTime() / 1000
-										},
-										{
-											fallback: answer.answer,
-											text: answer.answer,
-											color: '#0f5499',
-											ts: new Date(answer.date).getTime() / 1000
-										}
-									])
+									text: 'wait who are you again'
 								})
 
 								return send(res, 200)
-							},
+							}
 						})
 
 						return parser(event.event.text) || (async function() {
 							await slackBot.chat.postMessage({
 								channel: event.event.channel,
-								text: 'hmmmm',
+								text: `hmmmmm i didn't understand "${event.event.text}"`,
 								thread_ts: event.event.thread_ts || event.event.ts,
 								as_user: true,
 								icon_emoji: 'books'
