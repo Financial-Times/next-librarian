@@ -10,6 +10,7 @@ const url = require('url')
 const Slack = require('slack')
 const orderBy = require('lodash.orderby')
 const flatMap = require('lodash.flatmap')
+const regices = require('@quarterto/regices')
 
 const slackBot = new Slack({token: process.env.SLACK_BOT_TOKEN})
 const slackUser = new Slack({token: process.env.SLACK_USER_TOKEN})
@@ -30,6 +31,21 @@ setup().catch(error => {
 	console.error(error.stack)
 	process.exit(1)
 })
+
+const parseSlackPermalink = permalink => {
+	const [match, channel, ts1, ts2] = permalink.match(
+		/^https:\/\/\w+.slack.com\/archives\/([GC][\dA-Z]+)\/p(\d{10})(\d{6})$/
+	) || [false]
+
+	if(!match) {
+		throw new Error(`could not parse ${permalink} as a slack permalink`)
+	}
+
+	return {
+		channel,
+		ts: `${ts1}.${ts2}`
+	}
+}
 
 module.exports = route({
 	'/': () => `
@@ -76,6 +92,12 @@ module.exports = route({
 		return 
 	},
 
+	'/slack-permalink' (req) {
+		const {query} = url.parse(req.url, true)
+		const deets = parseSlackPermalink(query.url)
+		return slackUser.conversations.replies(deets)
+	},
+
 	async '/slack-event' (req, res) {
 		const event = await json(req)
 
@@ -91,55 +113,57 @@ module.exports = route({
 			case 'event_callback': {
 				switch(event.event.type) {
 					case 'app_mention': {
-						const isQuestion = event.event.text.endsWith('?')
+						const parser = regices({
+							async '^<@U[\\dA-Z]+>(.*)\\?' (query) {
+								if(!query) {
+									const {messages: [parentMessage]} = await slackUser.conversations.replies({
+										channel: event.event.channel,
+										ts: event.event.thread_ts
+									})
 
-						if(isQuestion) {
-							let [, query] = event.event.text.match(/^<@U[\dA-Z]+>(.*)?$/)
-							
-							if(!query) {
-								const {messages: [parentMessage]} = await slackUser.conversations.replies({
+									query = parentMessage.text
+								}
+
+								const answers = await Answers.find({
+									$text: {$search: query}
+								}, {
+									fields: {
+										score: { $meta: "textScore" }
+									}
+								}).limit(10).toArray()
+
+								const sorted = orderBy(answers, answer => {
+									const recency = 1 + new Date() - new Date(answer.date)
+									return answer.score / recency
+								}, 'desc')
+
+								await slackBot.chat.postMessage({
 									channel: event.event.channel,
-									ts: event.event.thread_ts
+									thread_ts: event.event.thread_ts || event.event.ts,
+									as_user: true,
+									icon_emoji: 'books',
+									text: !answers.length ? `sorry, i couldn't find anything relevant. maybe somebody else knows?` : '',
+									attachments: flatMap(sorted, answer => [
+										{
+											fallback: answer.question,
+											text: answer.question,
+											color: '#00994d',
+											ts: new Date(answer.date).getTime() / 1000
+										},
+										{
+											fallback: answer.answer,
+											text: answer.answer,
+											color: '#0f5499',
+											ts: new Date(answer.date).getTime() / 1000
+										}
+									])
 								})
 
-								query = parentMessage.text
-							}
+								return send(res, 200)
+							},
+						})
 
-							const answers = await Answers.find({
-								$text: {$search: query}
-							}, {
-								fields: {
-									score: { $meta: "textScore" }
-								}
-							}).limit(10).toArray()
-
-							const sorted = orderBy(answers, answer => {
-								const recency = 1 + new Date() - new Date(answer.date)
-								return answer.score / recency
-							}, 'desc')
-
-							await slackBot.chat.postMessage({
-								channel: event.event.channel,
-								thread_ts: event.event.thread_ts || event.event.ts,
-								as_user: true,
-								icon_emoji: 'books',
-								text: !answers.length ? `sorry, i couldn't find anything relevant. maybe somebody else knows?` : '',
-								attachments: flatMap(sorted, answer => [
-									{
-										fallback: answer.question,
-										text: answer.question,
-										color: '#00994d',
-										ts: new Date(answer.date).getTime() / 1000
-									},
-									{
-										fallback: answer.answer,
-										text: answer.answer,
-										color: '#0f5499',
-										ts: new Date(answer.date).getTime() / 1000
-									}
-								])
-							})
-						} else {
+						return parser(event.event.text) || (async function() {
 							await slackBot.chat.postMessage({
 								channel: event.event.channel,
 								text: 'hmmmm',
@@ -147,9 +171,9 @@ module.exports = route({
 								as_user: true,
 								icon_emoji: 'books'
 							})
-						}
 
-						return ''
+							return send(res, 200)
+						})()
 					}
 				}
 			}
