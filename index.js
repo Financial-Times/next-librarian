@@ -53,7 +53,10 @@ const parseSpec = async (spec, context) => {
 	spec = spec.trim()
 
 	const [isText, text] = spec.match(/^(?:"|“)(.+)(?:"|”)$/) || [false]
-	if(isText) return {type: 'text', data: {text}}
+	if(isText) return {type: 'text', data: Object.assign(
+		await getMessage(context),
+		{text}
+	)}
 
 	const permalink = parseSlackPermalink(spec)
 	if(permalink) return {type: 'message', data: await getMessage(permalink)}
