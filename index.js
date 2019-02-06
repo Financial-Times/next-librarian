@@ -18,7 +18,7 @@ const slackUser = new Slack({token: process.env.SLACK_USER_TOKEN})
 let Answers
 
 async function setup() {
-	const client = await MongoClient.connect(process.env.MONGO_URL)
+	const client = await MongoClient.connect(process.env.MONGODB_URI)
 	const db = client.db()
 	
 	Answers = db.collection('answers')
