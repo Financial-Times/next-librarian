@@ -52,7 +52,7 @@ const getMessage = query => slackUser.conversations.replies(query).then(({messag
 const parseSpec = async (spec, context) => {
 	spec = spec.trim()
 
-	const [isText, text] = spec.match(/^"(.+)"$/) || [false]
+	const [isText, text] = spec.match(/^(?:"|“)(.+)(?:"|”)$/) || [false]
 	if(isText) return {type: 'text', data: {text}}
 
 	const permalink = parseSlackPermalink(spec)
