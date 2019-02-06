@@ -1,0 +1,29 @@
+{
+  "name": "librarian",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "micro-dev"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quarterto/librarian.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/quarterto/librarian/issues"
+  },
+  "homepage": "https://github.com/quarterto/librarian#readme",
+  "devDependencies": {
+    "micro-dev": "^3.0.0"
+  },
+  "dependencies": {
+    "boulevard": "^2.3.5",
+    "micro": "^9.3.3",
+    "mongodb": "^3.1.13",
+    "urlencoded-body-parser": "^2.0.1"
+  }
+}
