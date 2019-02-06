@@ -101,50 +101,6 @@ const postAnswers = (answers, {event, boneless = false} = {}) => slackBot.chat.p
 })
 
 module.exports = route({
-	'/': () => `
-	<!doctype html>
-	<form action="/answers" method="post">
-		<label>
-			question
-			<input name="question">
-		</label>
-		<label>
-			answer
-			<input name="answer">
-		</label>
-		<label>
-			date
-			<input name="date" type="date">
-		</label>
-		<input type="submit">
-	</form>
-	<form action="/ask" method="get">
-		<input type="search" name="q">
-		<input type="submit">
-	</form>
-	`,
-
-	'/answers': get(() => Answers.find({}).toArray()),
-
-	'/answers': post(async (req, res) => {
-		const data = await form(req)
-		data.date = new Date(data.date)
-
-		const {insertedIds: {0: id}} = await Answers.insert(data)
-		res.setHeader('location', `/answers/${id}`)
-		return send(res, 302)
-	}),
-
-	'/answers/:id' (req, res, {id}) {
-		return Answers.findOne({_id: new ObjectID(id)})
-	},
-
-	'/ask' (req, res) {
-		const {query} = url.parse(req.url, true)
-
-		return 
-	},
-
 	'/slack-permalink' (req) {
 		const {query} = url.parse(req.url, true)
 		const deets = parseSlackPermalink(query.url)
