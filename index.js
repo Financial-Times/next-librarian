@@ -47,21 +47,33 @@ const parseSlackPermalink = permalink => {
 	}
 }
 
-const getMessage = query => slackUser.conversations.replies(query).then(({messages}) => messages[0])
+const getMessage = query => slackUser.conversations.replies(query).then(
+	({messages}) => Object.assign(
+		{},
+		query,
+		messages[0]
+	)
+)
 
 const parseSpec = async (spec, context) => {
 	spec = spec.trim()
 
 	const [isText, text] = spec.match(/^(?:"|“)(.+)(?:"|”)$/) || [false]
 	if(isText) return {type: 'text', data: Object.assign(
-		await getMessage(context),
+		await getMessage({
+			ts: context.parent || context.message,
+			channel: context.channel
+		}),
 		{text}
 	)}
 
 	const permalink = parseSlackPermalink(spec)
 	if(permalink) return {type: 'message', data: await getMessage(permalink)}
 
-	if(spec === 'this') return {type: 'message', data: await getMessage(context)}
+	if(spec === 'this') return {type: 'message', data: await getMessage({
+		ts: context.parent,
+		channel: context.channel
+	})} //TODO get previous message
 
 	throw new Error(`couldn't parse`)
 }
@@ -166,7 +178,19 @@ module.exports = route({
 								}
 
 								const answers = await Answers.find({
-									$text: {$search: query}
+									$and: [
+										{$text: {$search: query}},
+										{$or: [
+											{'answer.type': 'text'},
+											{'answer.data.channel': event.event.channel},
+											{'answer.data.channel': {$regex: '^C'}}, // starts with C: is public channel
+										]},
+										{$or: [
+											{'question.type': 'text'},
+											{'question.data.channel': event.event.channel},
+											{'question.data.channel': {$regex: '^C'}},
+										]},
+									]
 								}, {
 									fields: {
 										score: { $meta: "textScore" }
@@ -184,8 +208,9 @@ module.exports = route({
 
 							async '^<@U[\\dA-Z]+>(.+) (?:is (?:the|an) answer to|answers) (.+)$' (_, answerSpec, questionSpec) {
 								const context = {
-									channel: event.event.channel,
-									ts: event.event.thread_ts // TODO get most recent message if no thread?
+									parent: event.event.thread_ts,
+									message: event.event.ts,
+									channel: event.event.channel
 								}
 
 								const [answer, question] = await Promise.all([
@@ -216,7 +241,12 @@ module.exports = route({
 							}
 						})
 
-						return parser(event.event.text) || (async function() {
+						try {
+							const result = parser(event.event.text)
+							if(result) {
+								return await result
+							}
+							
 							await slackBot.chat.postMessage({
 								channel: event.event.channel,
 								text: `hmmmmm i didn't understand "${event.event.text}"`,
@@ -226,7 +256,23 @@ module.exports = route({
 							})
 
 							return send(res, 200)
-						})()
+						} catch(error) {
+							console.error(error.stack)
+
+							await slackBot.chat.postMessage({
+								channel: event.event.channel,
+								text: `i don't know about that one chief`,
+								attachments: [{
+									color: '#990f3d',
+									text: '```' + error.message + '```'
+								}],
+								thread_ts: event.event.thread_ts || event.event.ts,
+								as_user: true,
+								icon_emoji: 'books'
+							})
+
+							return send(res, 200)
+						}
 					}
 				}
 			}
