@@ -94,21 +94,19 @@ module.exports = route({
 						const isQuestion = event.event.text.endsWith('?')
 
 						if(isQuestion) {
-							await slackBot.chat.postMessage({
-								channel: event.event.channel,
-								thread_ts: event.event.thread_ts || event.event.ts,
-								as_user: true,
-								icon_emoji: 'books',
-								text: `Let's have a look...`,
-							})
+							let [, query] = event.event.text.match(/^<@U[\dA-Z]+>(.*)?$/)
+							
+							if(!query) {
+								const {messages: [parentMessage]} = await slackUser.conversations.replies({
+									channel: event.event.channel,
+									ts: event.event.thread_ts
+								})
 
-							const {messages: [parentMessage]} = await slackUser.conversations.replies({
-								channel: event.event.channel,
-								ts: event.event.thread_ts
-							})
+								query = parentMessage.text
+							}
 
 							const answers = await Answers.find({
-								$text: {$search: parentMessage.text}
+								$text: {$search: query}
 							}, {
 								fields: {
 									score: { $meta: "textScore" }
@@ -125,7 +123,7 @@ module.exports = route({
 								thread_ts: event.event.thread_ts || event.event.ts,
 								as_user: true,
 								icon_emoji: 'books',
-								text: '',
+								text: !answers.length ? `sorry, i couldn't find anything relevant. maybe somebody else knows?` : '',
 								attachments: flatMap(sorted, answer => [
 									{
 										fallback: answer.question,
