@@ -7,6 +7,12 @@ const {MongoClient, ObjectID} = require('mongodb')
 const {json, send, text} = require('micro')
 const form = require('urlencoded-body-parser')
 const url = require('url')
+const Slack = require('slack')
+const orderBy = require('lodash.orderby')
+const flatMap = require('lodash.flatmap')
+
+const slackBot = new Slack({token: process.env.SLACK_BOT_TOKEN})
+const slackUser = new Slack({token: process.env.SLACK_USER_TOKEN})
 
 let Answers
 
@@ -67,15 +73,90 @@ module.exports = route({
 	'/ask' (req, res) {
 		const {query} = url.parse(req.url, true)
 
-		return Answers.find({
-			$text: {$search: query.q}
-		}, {
-			fields: {
-				score: { $meta: "textScore" }
-			},
-			sort: {
-				date: -1
-			}
-		}).toArray()
+		return 
 	},
+
+	async '/slack-event' (req, res) {
+		const event = await json(req)
+
+		if(event.token !== process.env.SLACK_VERIFICATION_TOKEN) {
+			return send(res, 401)
+		}
+
+		switch(event.type) {
+			case 'url_verification': {
+				return event.challenge
+			}
+
+			case 'event_callback': {
+				switch(event.event.type) {
+					case 'app_mention': {
+						const isQuestion = event.event.text.endsWith('?')
+
+						if(isQuestion) {
+							await slackBot.chat.postMessage({
+								channel: event.event.channel,
+								thread_ts: event.event.thread_ts || event.event.ts,
+								as_user: true,
+								icon_emoji: 'books',
+								text: `Let's have a look...`,
+							})
+
+							const {messages: [parentMessage]} = await slackUser.conversations.replies({
+								channel: event.event.channel,
+								ts: event.event.thread_ts
+							})
+
+							const answers = await Answers.find({
+								$text: {$search: parentMessage.text}
+							}, {
+								fields: {
+									score: { $meta: "textScore" }
+								}
+							}).limit(10).toArray()
+
+							const sorted = orderBy(answers, answer => {
+								const recency = 1 + new Date() - new Date(answer.date)
+								return answer.score / recency
+							}, 'desc')
+
+							await slackBot.chat.postMessage({
+								channel: event.event.channel,
+								thread_ts: event.event.thread_ts || event.event.ts,
+								as_user: true,
+								icon_emoji: 'books',
+								text: '',
+								attachments: flatMap(sorted, answer => [
+									{
+										fallback: answer.question,
+										text: answer.question,
+										color: '#00994d',
+										ts: new Date(answer.date).getTime() / 1000
+									},
+									{
+										fallback: answer.answer,
+										text: answer.answer,
+										color: '#0f5499',
+										ts: new Date(answer.date).getTime() / 1000
+									}
+								])
+							})
+						} else {
+							await slackBot.chat.postMessage({
+								channel: event.event.channel,
+								text: 'hmmmm',
+								thread_ts: event.event.thread_ts || event.event.ts,
+								as_user: true,
+								icon_emoji: 'books'
+							})
+						}
+
+						return ''
+					}
+				}
+			}
+		}
+
+		return send(res, 400)
+	}
 })
