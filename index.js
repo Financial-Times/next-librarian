@@ -34,7 +34,7 @@ setup().catch(error => {
 
 const parseSlackPermalink = permalink => {
 	const [match, channel, ts1, ts2] = permalink.match(
-		/^<?https:\/\/\w+.slack.com\/archives\/([GC][\dA-Z]+)\/p(\d{10})(\d{6})>?$/
+		/^<?https:\/\/\w+.slack.com\/archives\/([GC][\dA-Z]+)\/p(\d{10})(\d{6})(?:\??.*)?>?$/
 	) || [false]
 
 	if(!match) {
