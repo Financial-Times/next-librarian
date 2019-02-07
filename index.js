@@ -78,11 +78,10 @@ const parseSpec = async (spec, context) => {
 	throw new Error(`couldn't parse`)
 }
 
-const postAnswers = (answers, {event, boneless = false} = {}) => slackBot.chat.postMessage({
+const postAnswers = (answers, {event, boneless = false, debug = false} = {}) => slackBot.chat.postMessage({
 	channel: event.event.channel,
 	thread_ts: event.event.thread_ts || event.event.ts,
 	as_user: true,
-	icon_emoji: 'books',
 	text: !answers.length ? `sorry, i couldn't find anything relevant. maybe somebody else knows?` : '',
 	attachments: flatMap(answers, answer => [
 		{
@@ -95,18 +94,13 @@ const postAnswers = (answers, {event, boneless = false} = {}) => slackBot.chat.p
 			fallback: answer.answer.data.text,
 			text: answer.answer.data.text,
 			color: '#0f5499',
-			ts: answer.answer.data.ts
+			ts: answer.answer.data.ts,
+			footer: debug ? `score: ${answer.sortScore}` : null,
 		}
 	])
 })
 
 module.exports = route({
-	'/slack-permalink' (req) {
-		const {query} = url.parse(req.url, true)
-		const deets = parseSlackPermalink(query.url)
-		return slackUser.conversations.replies(deets)
-	},
-
 	async '/slack-event' (req, res) {
 		const event = await json(req)
 
@@ -132,6 +126,12 @@ module.exports = route({
 
 									query = parentMessage.text
 								}
+								
+								let debug = false
+								if(query.includes('DEBUG')) {
+									query = query.replace('DEBUG', '')
+									debug = true
+								}
 
 								const answers = await Answers.find({
 									$and: [
@@ -155,10 +155,10 @@ module.exports = route({
 
 								const sorted = orderBy(answers, answer => {
 									const recency = 1 + new Date() - new Date(answer.answer.data.date)
-									return answer.score / recency
+									return answer.sortScore = answer.score / recency
 								}, 'desc')
 
-								await postAnswers(sorted, {event})
+								await postAnswers(sorted, {event, debug})
 								return send(res, 200)
 							},
 
@@ -178,20 +178,6 @@ module.exports = route({
 								await Answers.insert(answerData)
 
 								await postAnswers([answerData], {event, boneless: true})
-
-								return send(res, 200)
-							},
-
-							async '^<@U[\\dA-Z]+> forget everything you(\'|’)ve ever learnt. yes i(\'|’)m sure' () {
-								await Answers.remove({})
-
-								await slackBot.chat.postMessage({
-									channel: event.event.channel,
-									thread_ts: event.event.thread_ts || event.event.ts,
-									as_user: true,
-									icon_emoji: 'books',
-									text: 'wait who are you again'
-								})
 
 								return send(res, 200)
 							}
