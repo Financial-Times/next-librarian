@@ -25,6 +25,7 @@
     "boulevard": "^2.3.5",
     "leven": "^2.1.0",
     "lodash.flatmap": "^4.5.0",
+    "lodash.groupby": "^4.6.0",
     "lodash.orderby": "^4.6.0",
     "micro": "^9.3.3",
     "mongodb": "^3.1.13",

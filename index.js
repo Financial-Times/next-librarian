@@ -10,6 +10,7 @@ const url = require('url')
 const Slack = require('slack')
 const orderBy = require('lodash.orderby')
 const flatMap = require('lodash.flatmap')
+const groupBy = require('lodash.groupby')
 const regices = require('@quarterto/regices')
 
 const slackBot = new Slack({token: process.env.SLACK_BOT_TOKEN})
@@ -78,29 +79,55 @@ const parseSpec = async (spec, context) => {
 	throw new Error(`couldn't parse`)
 }
 
+const answerAuthorInfo = async answer => {
+	const {user} = await slackBot.users.info({
+		user: answer.data.user
+	})
+
+	const {permalink} = await slackBot.chat.getPermalink({
+		channel: answer.data.channel,
+		message_ts: answer.data.ts,
+	})
+
+	const {channel} = await slackBot.conversations.info({
+		channel: answer.data.channel
+	})
+
+	return {
+		footer: `${user.real_name} <${permalink}|in #${channel.name}>`,
+		footer_icon: user.profile.image_32,
+	}
+}
+
 const answerAttachment = async (answer, {boneless, color, extra}) => Object.assign({
 	fallback: answer.data.text,
 	text: answer.data.text,
 	color,
-}, extra, boneless ? {} : {
+}, extra, boneless ? {} : Object.assign({
 	ts: answer.data.ts,
-	author_name: (await slackBot.users.info({
-		user: answer.data.user
-	})).user.real_name
-})
+}, await answerAuthorInfo(answer)))
 
-const postAnswers = async (answers, {event, boneless = false, debug = false} = {}) => slackBot.chat.postMessage({
-	channel: event.event.channel,
-	thread_ts: event.event.thread_ts || event.event.ts,
-	as_user: true,
-	text: !answers.length ? `sorry, i couldn't find anything relevant. maybe somebody else knows?` : '',
-	attachments: flatMap(await Promise.all(answers.map(async answer => [
-		await answerAttachment(answer.question, {color: '#00994d', boneless}),
-		await answerAttachment(answer.answer, {color: '#0f5499', boneless, extra: {
-			footer: debug ? `score: ${answer.sortScore}` : null,
-		}}),
-	])))
-})
+const postAnswers = async (answers, {event, boneless = false, debug = false} = {}) => {
+	const byQuestion = groupBy(answers, 'question.data.ts')
+
+	const attachments = await Promise.all(flatMap(byQuestion, group => [
+		answerAttachment(group[0].question, {color: '#00994d', boneless})
+	].concat(
+		group.map(
+			answer => answerAttachment(answer.answer, {color: '#0f5499', boneless, extra: {
+				footer: debug ? `score: ${answer.sortScore}` : null,
+			}}),
+		)
+	)))
+
+	return slackBot.chat.postMessage({
+		channel: event.event.channel,
+		thread_ts: event.event.thread_ts || event.event.ts,
+		as_user: true,
+		text: !answers.length ? `sorry, i couldn't find anything relevant. maybe somebody else knows?` : '',
+		attachments
+	})
+}
 
 module.exports = route({
 	async '/slack-event' (req, res) {
