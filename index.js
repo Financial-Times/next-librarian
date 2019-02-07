@@ -61,7 +61,7 @@ const parseSpec = async (spec, context) => {
 	const [isText, text] = spec.match(/^(?:"|“)(.+)(?:"|”)$/) || [false]
 	if(isText) return {type: 'text', data: Object.assign(
 		await getMessage({
-			ts: context.parent || context.message,
+			ts: context.message,
 			channel: context.channel
 		}),
 		{text}
