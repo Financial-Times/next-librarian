@@ -73,31 +73,33 @@ const parseSpec = async (spec, context) => {
 	if(spec === 'this') return {type: 'message', data: await getMessage({
 		ts: context.parent,
 		channel: context.channel
-	})} //TODO get previous message
+	})} //TODO get previous message?
 
 	throw new Error(`couldn't parse`)
 }
 
-const postAnswers = (answers, {event, boneless = false, debug = false} = {}) => slackBot.chat.postMessage({
+const answerAttachment = async (answer, {boneless, color, extra}) => Object.assign({
+	fallback: answer.data.text,
+	text: answer.data.text,
+	color,
+}, extra, boneless ? {} : {
+	ts: answer.data.ts,
+	author_name: (await slackBot.users.info({
+		user: answer.data.user
+	})).user.real_name
+})
+
+const postAnswers = async (answers, {event, boneless = false, debug = false} = {}) => slackBot.chat.postMessage({
 	channel: event.event.channel,
 	thread_ts: event.event.thread_ts || event.event.ts,
 	as_user: true,
 	text: !answers.length ? `sorry, i couldn't find anything relevant. maybe somebody else knows?` : '',
-	attachments: flatMap(answers, answer => [
-		{
-			fallback: answer.question.data.text,
-			text: answer.question.data.text,
-			color: '#00994d',
-			ts: answer.question.data.ts
-		},
-		{
-			fallback: answer.answer.data.text,
-			text: answer.answer.data.text,
-			color: '#0f5499',
-			ts: answer.answer.data.ts,
+	attachments: flatMap(await Promise.all(answers.map(async answer => [
+		await answerAttachment(answer.question, {color: '#00994d', boneless}),
+		await answerAttachment(answer.answer, {color: '#0f5499', boneless, extra: {
 			footer: debug ? `score: ${answer.sortScore}` : null,
-		}
-	])
+		}}),
+	])))
 })
 
 module.exports = route({
@@ -116,22 +118,49 @@ module.exports = route({
 			case 'event_callback': {
 				switch(event.event.type) {
 					case 'app_mention': {
+						const removeMention = text => text.replace(new RegExp(`\\s*<@${event.authed_users[0]}>\\s*`, 'g'), '').trim()
+						const eventTextWithoutMention = removeMention(event.event.text)
+
 						const parser = regices({
-							async '^<@U[\\dA-Z]+>(.*)\\?' (_, query) {
+							async '^(.+) (?:is (?:the|an) answer to|answers) (.+)$' (_, answerSpec, questionSpec) {
+								const context = {
+									parent: event.event.thread_ts,
+									message: event.event.ts,
+									channel: event.event.channel
+								}
+
+								const [answer, question] = await Promise.all([
+									parseSpec(answerSpec, context),
+									parseSpec(questionSpec, context)
+								])
+
+								console.log((answer, question))
+
+								const answerData = { answer, question }
+								await Answers.insert(answerData)
+
+								await postAnswers([answerData], {event, boneless: true})
+
+								return send(res, 200)
+							},
+
+							async '.*' (query) {
+								let debug = false
+								if(query.includes('DEBUG')) {
+									query = query.replace('DEBUG', '').trim()
+									debug = true
+								}
+
 								if(!query) {
 									const parentMessage = await getMessage({
 										channel: event.event.channel,
 										ts: event.event.thread_ts
 									})
 
-									query = parentMessage.text
+									query = removeMention(parentMessage.text)
 								}
-								
-								let debug = false
-								if(query.includes('DEBUG')) {
-									query = query.replace('DEBUG', '')
-									debug = true
-								}
+
+								query.replace(/\?$/, '')
 
 								const answers = await Answers.find({
 									$and: [
@@ -154,37 +183,17 @@ module.exports = route({
 								}).limit(10).toArray()
 
 								const sorted = orderBy(answers, answer => {
-									const recency = 1 + new Date() - new Date(answer.answer.data.date)
+									const recency = 1 + Date.now() / 1000 - parseFloat(answer.answer.data.ts)
 									return answer.sortScore = answer.score / recency
 								}, 'desc')
 
 								await postAnswers(sorted, {event, debug})
 								return send(res, 200)
-							},
-
-							async '^<@U[\\dA-Z]+>(.+) (?:is (?:the|an) answer to|answers) (.+)$' (_, answerSpec, questionSpec) {
-								const context = {
-									parent: event.event.thread_ts,
-									message: event.event.ts,
-									channel: event.event.channel
-								}
-
-								const [answer, question] = await Promise.all([
-									parseSpec(answerSpec, context),
-									parseSpec(questionSpec, context)
-								])
-
-								const answerData = { answer, question }
-								await Answers.insert(answerData)
-
-								await postAnswers([answerData], {event, boneless: true})
-
-								return send(res, 200)
 							}
 						})
 
 						try {
-							const result = parser(event.event.text)
+							const result = parser(eventTextWithoutMention)
 							if(result) {
 								return await result
 							}
