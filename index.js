@@ -122,15 +122,15 @@ const mixColour = (from, to) => amount => formatColour(
 	[from, to].map(parseColour).reduce((from, to) => from.map((c, i) => Math.round(c + amount * (to[i] - c))))
 )
 
-const questionColour = mixColour('#00994d', '#fff1e5')
-const answerColour = mixColour('#0f5499', '#cce6ff')
+const questionColour = mixColour('#00994d', '#ffffff')
+const answerColour = mixColour('#0f5499', '#ffffff')
 
 const postAnswers = async (answers, {event, boneless = false, debug = false} = {}) => {
 	const maxScore = Math.max(...answers.map(answer => answer.sortScore))
 
 	const attachments = await Promise.all(
 		answers.reduce((attachments, answer, i) => {
-			const scoreQuotient = (maxScore - answer.sortScore) / maxScore
+			const scoreQuotient = Math.sqrt((maxScore - answer.sortScore) / maxScore)
 
 			const answerAttachments = [
 				answerAttachment(answer.answer, {color: answerColour(scoreQuotient), boneless, extra: {
@@ -156,8 +156,6 @@ const postAnswers = async (answers, {event, boneless = false, debug = false} = {
 		},
 		[]
 	))
-
-	console.log(attachments)
 
 	return slackBot.chat.postMessage({
 		channel: event.event.channel,
