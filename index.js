@@ -125,6 +125,15 @@ const mixColour = (from, to) => amount => formatColour(
 const questionColour = mixColour('#00994d', '#ffffff')
 const answerColour = mixColour('#0f5499', '#ffffff')
 
+const getThread = event => {
+	// don't thread direct messages
+	if(event.event.channel.startsWith('DG')) {
+		return undefined
+	}
+
+	return event.event.thread_ts || event.event.ts
+}
+
 const postAnswers = async (answers, {event, boneless = false, debug = false} = {}) => {
 	const maxScore = Math.max(...answers.map(answer => answer.sortScore))
 
@@ -170,7 +179,7 @@ const postAnswers = async (answers, {event, boneless = false, debug = false} = {
 
 	return slackBot.chat.postMessage({
 		channel: event.event.channel,
-		thread_ts: event.event.thread_ts || event.event.ts,
+		thread_ts: getThread(event),
 		as_user: true,
 		text: !answers.length ? `sorry, i couldn't find anything relevant. maybe somebody else knows?` : '',
 		attachments
@@ -213,6 +222,12 @@ module.exports = route({
 
 			case 'event_callback': {
 				switch(event.event.type) {
+					case 'message': {
+						// message events include the messages librarian itself sends, which, lol
+						if(event.event.user === event.authed_users[0]) {
+							return send(res, 200)
+						}
+					}
 					case 'app_mention': {
 						const removeMention = text => text.replace(new RegExp(`\\s*<@${event.authed_users[0]}>\\s*`, 'g'), '').trim()
 						const eventTextWithoutMention = removeMention(event.event.text)
@@ -301,7 +316,7 @@ module.exports = route({
 							await slackBot.chat.postMessage({
 								channel: event.event.channel,
 								text: `hmmmmm i didn't understand "${event.event.text}"`,
-								thread_ts: event.event.thread_ts || event.event.ts,
+								thread_ts: getThread(event),
 								as_user: true,
 								icon_emoji: 'books'
 							})
@@ -317,7 +332,7 @@ module.exports = route({
 									color: '#990f3d',
 									text: '```' + error.message + '```'
 								}],
-								thread_ts: event.event.thread_ts || event.event.ts,
+								thread_ts: getThread(event),
 								as_user: true,
 								icon_emoji: 'books'
 							})
