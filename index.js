@@ -213,6 +213,8 @@ module.exports = route({
 									debug = true
 								}
 
+								query = query.replace(/\?$/g, '')
+
 								if(!query) {
 									const parentMessage = await getMessage({
 										channel: event.event.channel,
@@ -221,8 +223,6 @@ module.exports = route({
 
 									query = removeMention(parentMessage.text)
 								}
-
-								query.replace(/\?$/, '')
 
 								const answers = await Answers.find({
 									$and: [
