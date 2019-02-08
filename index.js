@@ -108,17 +108,32 @@ const answerAttachment = async (answer, {boneless, color, extra}) => Object.assi
 }, await answerAuthorInfo(answer)))
 
 const postAnswers = async (answers, {event, boneless = false, debug = false} = {}) => {
-	const byQuestion = groupBy(answers, 'question.data.ts')
+	const attachments = await Promise.all(
+		answers.reduce((attachments, answer, i) => {
+			const answerAttachments = [
+				answerAttachment(answer.answer, {color: '#0f5499', boneless, extra: {
+					footer: debug ? `score: ${answer.sortScore}` : null,
+				}})
+			]
 
-	const attachments = await Promise.all(flatMap(byQuestion, group => [
-		answerAttachment(group[0].question, {color: '#00994d', boneless})
-	].concat(
-		group.map(
-			answer => answerAttachment(answer.answer, {color: '#0f5499', boneless, extra: {
-				footer: debug ? `score: ${answer.sortScore}` : null,
-			}}),
-		)
-	)))
+			if(
+				i === 0
+				|| (answer.question.type === 'message' &&
+					answer.question.data.ts !== answers[i - 1].question.data.ts
+				) 
+				|| (answer.question.type === 'text' &&
+					answer.question.data.text !== answers[i - 1].question.data.text
+				)
+			) {
+				answerAttachments.unshift(
+					answerAttachment(answer.question, {color: '#00994d', boneless})
+				)
+			}
+
+			return attachments.concat(answerAttachments)
+		},
+		[]
+	))
 
 	return slackBot.chat.postMessage({
 		channel: event.event.channel,
@@ -160,8 +175,6 @@ module.exports = route({
 									parseSpec(answerSpec, context),
 									parseSpec(questionSpec, context)
 								])
-
-								console.log((answer, question))
 
 								const answerData = { answer, question }
 								await Answers.insert(answerData)
