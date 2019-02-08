@@ -130,7 +130,7 @@ const postAnswers = async (answers, {event, boneless = false, debug = false} = {
 
 	const attachments = await Promise.all(
 		answers.reduce((attachments, answer, i) => {
-			const scoreQuotient = boneless ? 0 : Math.sqrt((maxScore - answer.sortScore) / maxScore)
+			const scoreQuotient = boneless ? 0 : Math.sqrt((maxScore - answer.sortScore) / maxScore) * 0.9
 
 			const answerAttachments = [
 				answerAttachment(answer.answer, {color: answerColour(scoreQuotient), boneless, extra: {
