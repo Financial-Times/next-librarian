@@ -143,7 +143,7 @@ const postAnswers = async (answers, {event, boneless = false, debug = false} = {
 
 			const answerAttachments = [
 				answerAttachment(answer.answer, {color: answerColour(scoreQuotient), boneless, extra: {
-					author_name: debug ? `score: ${answer.sortScore}, returned: ${answer.returned}` : null,
+					author_name: debug ? `score: ${answer.sortScore}, returned: ${answer.returned} times` : null,
 				}})
 			]
 
@@ -226,6 +226,10 @@ module.exports = route({
 						// message events include the messages librarian itself sends, which, lol
 						if(event.event.user === event.authed_users[0]) {
 							return send(res, 200)
+						}
+
+						if(event.event.subtype === 'message_changed') {
+							Object.assign(event.event, event.event.message)
 						}
 					}
 					case 'app_mention': {
