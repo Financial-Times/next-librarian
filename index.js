@@ -130,13 +130,24 @@ const postAnswers = async (answers, {event, boneless = false, debug = false} = {
 
 	const attachments = await Promise.all(
 		answers.reduce((attachments, answer, i) => {
-			const scoreQuotient = Math.sqrt((maxScore - answer.sortScore) / maxScore)
+			const scoreQuotient = boneless ? 0 : Math.sqrt((maxScore - answer.sortScore) / maxScore)
 
 			const answerAttachments = [
 				answerAttachment(answer.answer, {color: answerColour(scoreQuotient), boneless, extra: {
-					footer: debug ? `score: ${answer.sortScore}` : null,
+					author_name: debug ? `score: ${answer.sortScore}, returned: ${answer.returned}` : null,
 				}})
 			]
+
+			if(boneless) answerAttachments.push({
+				text: '',
+				callback_id: answer._id,
+				actions: boneless ? [{
+					"name": "delet this",
+					"text": "Undo",
+					"style": "danger",
+					"type": "button",
+				}] : [],
+			})
 
 			if(
 				i === 0
@@ -167,6 +178,27 @@ const postAnswers = async (answers, {event, boneless = false, debug = false} = {
 }
 
 module.exports = route({
+	'/slack-action': post(async (req, res) => {
+		const {payload} = await form(req)
+		const data = JSON.parse(payload)
+
+		if(data.token !== process.env.SLACK_VERIFICATION_TOKEN) {
+			return send(res, 401)
+		}
+
+		for(const action of data.actions) switch(action.name) {
+			case 'delet this': {
+				await Answers.remove({_id: new ObjectID(data.callback_id)})
+				await slackBot.chat.delete({
+					ts: data.message_ts,
+					channel: data.channel.id,
+				})
+			}
+		}
+
+		return send(res, 200)
+	}),
+
 	async '/slack-event' (req, res) {
 		const event = await json(req)
 
@@ -244,8 +276,14 @@ module.exports = route({
 									}
 								}).limit(10).toArray()
 
+								// increment the number of times these answers has been returned but don't wait for it
+								Answers.updateMany(
+									{_id: {$in: answers.map(({_id}) => new ObjectID(_id))}},
+									{$inc: {returned: 1}},
+								)
+
 								const sorted = orderBy(answers, answer => {
-									const recency = 1 + Date.now() / 1000 - parseFloat(answer.answer.data.ts)
+									const recency = Math.sqrt(1 + Date.now() / 1000 - parseFloat(answer.answer.data.ts))
 									return answer.sortScore = answer.score / recency
 								}, 'desc')
 
@@ -259,7 +297,7 @@ module.exports = route({
 							if(result) {
 								return await result
 							}
-							
+
 							await slackBot.chat.postMessage({
 								channel: event.event.channel,
 								text: `hmmmmm i didn't understand "${event.event.text}"`,
