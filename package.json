@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "micro-dev"
+    "start": "concurrently npm:start:*",
+    "start:server": "micro-dev",
+    "start:tunnel": "ssh -R ft-next-librarian:80:localhost:3000 serveo.net"
   },
   "repository": {
     "type": "git",
@@ -18,6 +20,7 @@
   },
   "homepage": "https://github.com/quarterto/librarian#readme",
   "devDependencies": {
+    "concurrently": "^4.1.0",
     "micro-dev": "^3.0.0"
   },
   "dependencies": {
