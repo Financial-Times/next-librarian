@@ -348,6 +348,7 @@ module.exports = route({
 			}
 		}
 
+		console.log(event)
 		return send(res, 400)
 	}
 })
